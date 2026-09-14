@@ -1,39 +1,34 @@
-name: Build iOS Tweak dylib
+name: Build Gesture Recorder Tweak
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ "main", "master" ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: macos-latest
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Install ldid
-      run: |
-        brew install ldid
+      - name: Setup Theos
+        uses: Randomblock1/theos-action@v1
+        with:
+          theos-dir: 'theos'
 
-    - name: Setup Theos
-      run: |
-        rm -rf ~/theos
-        git clone --recursive https://github.com/theos/theos.git ~/theos
-        rm -rf ~/theos/sdks
-        git clone --depth=1 https://github.com/theos/sdks.git ~/theos/sdks
+      - name: Install ldid
+        run: brew install ldid
 
-    - name: Build Tweak
-      run: |
-        export THEOS=~/theos
-        make clean
-        make
-      env:
-        THEOS: /Users/runner/theos
+      - name: Build Tweak
+        run: |
+          export THEOS=${{ github.workspace }}/theos
+          make clean
+          make package FINALPACKAGE=1
 
-    - name: Upload Dylib Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ProAdManager-dylib
-        path: .theos/obj/debug/*.dylib
+      - name: Upload Deb Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: GestureRecorder-Deb
+          path: ./packages/*.deb
