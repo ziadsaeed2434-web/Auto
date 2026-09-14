@@ -1,26 +1,32 @@
-// Tweak.xm
 #import <UIKit/UIKit.h>
 #import "GestureRecorder.h"
 
-// تشغيل المسجل عند بدء التطبيق
-%hook UIApplication
+// hook على UIWindow لالتقاط كل اللمسات داخل التطبيق
+%hook UIWindow
 
-- (void)applicationDidBecomeActive:(UIApplication *)application {
+- (void)sendEvent:(UIEvent *)event {
+    GestureRecorder *rec = [GestureRecorder sharedInstance];
+    if (rec.isRecording) {
+        for (UITouch *touch in event.allTouches) {
+            if (touch.phase == UITouchPhaseBegan) {
+                CGPoint p = [touch locationInView:self];
+                [rec.recordedTouches addObject:@{@"x": @(p.x), @"y": @(p.y)}];
+                [rec flashIndicatorAtPoint:p];
+            }
+        }
+    }
     %orig;
-    // تأخير بسيط للتأكد من جاهزية النافذة الرئيسية
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[GestureRecorder sharedInstance] show];
-    });
 }
 
 %end
 
-// إضافة زر للتبديل (اختياري) عند النقر المطول على زر الطاقة أو أي مكان
-%hook SpringBoard
+// إظهار اللوحة عند اكتمال تشغيل التطبيق
+%hook UIApplication
 
-- (void)applicationDidFinishLaunching:(id)application {
+- (void)applicationDidFinishLaunching:(id)app {
     %orig;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
         [[GestureRecorder sharedInstance] show];
     });
 }
