@@ -1,8 +1,24 @@
 #import <UIKit/UIKit.h>
 #import "GestureRecorder.h"
 
-// hook على UIWindow لالتقاط كل اللمسات داخل التطبيق
+static BOOL g_didShowPanel = NO;
+
 %hook UIWindow
+
+- (void)makeKeyAndVisible {
+    %orig;
+
+    // نعرض اللوحة مرة واحدة فقط، عند ظهور نافذة التطبيق الرئيسية
+    if (!g_didShowPanel && self.windowScene != nil) {
+        g_didShowPanel = YES;
+        NSLog(@"[GestureRecorder] Window became key, showing panel. Scene: %@", self.windowScene);
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            [[GestureRecorder sharedInstance] showInWindowScene:self.windowScene];
+        });
+    }
+}
 
 - (void)sendEvent:(UIEvent *)event {
     GestureRecorder *rec = [GestureRecorder sharedInstance];
@@ -20,15 +36,7 @@
 
 %end
 
-// إظهار اللوحة عند اكتمال تشغيل التطبيق
-%hook UIApplication
-
-- (void)applicationDidFinishLaunching:(id)app {
-    %orig;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        [[GestureRecorder sharedInstance] show];
-    });
+// تسجيل تشخيصي عند التحميل
+%ctor {
+    NSLog(@"[GestureRecorder] Tweak loaded successfully!");
 }
-
-%end
