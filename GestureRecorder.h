@@ -4,7 +4,7 @@
 @interface GestureRecorder : NSObject
 
 + (instancetype)sharedInstance;
-- (void)show;
+- (void)showInWindowScene:(UIWindowScene *)scene;
 - (void)hide;
 - (void)flashIndicatorAtPoint:(CGPoint)point;
 
