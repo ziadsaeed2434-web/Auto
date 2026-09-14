@@ -1,0 +1,9 @@
+Package: com.yourname.gesturerecorder
+Name: Gesture Recorder
+Depends: mobilesubstrate
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: Floating gesture recorder with touch simulation and visual feedback.
+Maintainer: YourName
+Author: YourName
+Section: Tweaks
