@@ -5,7 +5,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = GestureRecorder
 GestureRecorder_FILES = Tweak.xm GestureRecorder.m PTFakeTouch/PTFakeTouch.m
-GestureRecorder_CFLAGS = -fobjc-arc -I. -IPTFakeTouch
+GestureRecorder_CFLAGS = -fobjc-arc -I. -IPTFakeTouch -Wno-deprecated-declarations -Wno-error
 GestureRecorder_FRAMEWORKS = UIKit Foundation QuartzCore IOKit
 
 include $(THEOS_MAKE_PATH)/tweak.mk
