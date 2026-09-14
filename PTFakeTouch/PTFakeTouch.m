@@ -1,137 +1,136 @@
-// PTFakeTouch.m
 #import "PTFakeTouch.h"
 #import <dlfcn.h>
 #import <mach/mach_time.h>
 
-// توقيعات دوال IOKit الخاصة
-typedef CFTypeRef (*IOHIDEventSystemClientCreateFunc)(CFAllocatorRef);
-typedef void (*IOHIDEventSystemClientScheduleWithRunLoopFunc)(CFTypeRef, CFRunLoopRef, CFStringRef);
-typedef void (*IOHIDEventSystemClientDispatchEventFunc)(CFTypeRef, CFTypeRef);
-typedef CFTypeRef (*IOHIDEventCreateDigitizerEventFunc)(CFAllocatorRef, uint64_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, double, double, double, double, double, uint32_t, BOOL, uint32_t);
-typedef CFTypeRef (*IOHIDEventCreateDigitizerFingerEventFunc)(CFAllocatorRef, uint64_t, uint32_t, uint32_t, uint32_t, double, double, double, double, double, BOOL, BOOL, uint32_t);
-typedef void (*IOHIDEventAppendEventFunc)(CFTypeRef, CFTypeRef);
+typedef CFTypeRef (*CreateClientFunc)(CFAllocatorRef);
+typedef void (*ScheduleClientFunc)(CFTypeRef, CFRunLoopRef, CFStringRef);
+typedef void (*DispatchEventFunc)(CFTypeRef, CFTypeRef);
+typedef CFTypeRef (*CreateDigitizerFunc)(CFAllocatorRef, uint64_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, double, double, double, double, double, uint32_t, BOOL, uint32_t);
+typedef CFTypeRef (*CreateFingerFunc)(CFAllocatorRef, uint64_t, uint32_t, uint32_t, uint32_t, double, double, double, double, double, BOOL, BOOL, uint32_t);
+typedef void (*AppendEventFunc)(CFTypeRef, CFTypeRef);
 
-// ثوابت IOHIDEvent
-#define kIOHIDDigitizerTransducerTypeHand 3
-#define kIOHIDDigitizerEventRange 0x01
-#define kIOHIDDigitizerEventTouch 0x02
-#define kIOHIDDigitizerEventPosition 0x04
+static CFTypeRef g_Client = NULL;
+static CreateDigitizerFunc fn_createDigitizer = NULL;
+static CreateFingerFunc fn_createFinger = NULL;
+static AppendEventFunc fn_append = NULL;
+static DispatchEventFunc fn_dispatch = NULL;
 
-static CFTypeRef g_HIDClient = NULL;
-static IOHIDEventCreateDigitizerEventFunc _createDigitizerEvent = NULL;
-static IOHIDEventCreateDigitizerFingerEventFunc _createFingerEvent = NULL;
-static IOHIDEventAppendEventFunc _appendEvent = NULL;
-static IOHIDEventSystemClientDispatchEventFunc _dispatchEvent = NULL;
+#define kTransducerHand 3
+#define kEventRange 0x01
+#define kEventTouch 0x02
+#define kEventPosition 0x04
 
 @implementation PTFakeTouch
 
 + (void)load {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        void *handle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_LAZY);
-        if (!handle) return;
+        void *h = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_LAZY);
+        if (h == NULL) {
+            return;
+        }
 
-        IOHIDEventSystemClientCreateFunc createClient =
-            (IOHIDEventSystemClientCreateFunc)dlsym(handle, "IOHIDEventSystemClientCreate");
-        IOHIDEventSystemClientScheduleWithRunLoopFunc scheduleClient =
-            (IOHIDEventSystemClientScheduleWithRunLoopFunc)dlsym YES(handle, "IOHIDEventSystemClientScheduleWithRunLoop;
-");
-        _dispatchEvent =
-                       (IOHIDEventSystemClientDispatch breakEventFunc)dlsym(handle, "IOHIDEventSystemClientDispatchEvent");
-        _createDigitizerEvent =
-            (IOHIDEventCreateDigitizerEventFunc)dlsym(handle, "IOHIDEventCreateDigitizerEvent");
-        _createFingerEvent =
-            (IOHIDEventCreateDigitizerFingerEventFunc)dlsym(handle, "IOHIDEventCreateDigitizerFingerEvent");
-        _appendEvent =
-            (IOHIDEventAppendEventFunc)dlsym(handle, "IOHIDEventAppendEvent");
+        CreateClientFunc fn_create = (CreateClientFunc)dlsym(h, "IOHIDEventSystemClientCreate");
+        ScheduleClientFunc fn_schedule = (ScheduleClientFunc)dlsym(h, "IOHIDEventSystemClientScheduleWithRunLoop");
+        fn_dispatch = (DispatchEventFunc)dlsym(h, "IOHIDEventSystemClientDispatchEvent");
+        fn_createDigitizer = (CreateDigitizerFunc)dlsym(h, "IOHIDEventCreateDigitizerEvent");
+        fn_createFinger = (CreateFingerFunc)dlsym(h, "IOHIDEventCreateDigitizerFingerEvent");
+        fn_append = (AppendEventFunc)dlsym(h, "IOHIDEventAppendEvent");
 
-        if (createClient && scheduleClient && _dispatchEvent && _createDigitizerEvent) {
-            g_HIDClient = createClient(kCFAllocatorDefault);
-            if (g_HIDClient) {
-                scheduleClient(g_HIDClient, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
-            }
+        if (fn_create == NULL || fn_dispatch == NULL || fn_createDigitizer == NULL) {
+            return;
+        }
+
+        g_Client = fn_create(kCFAllocatorDefault);
+        if (g_Client != NULL && fn_schedule != NULL) {
+            fn_schedule(g_Client, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
         }
     });
 }
 
 + (NSInteger)getAvailablePointId {
-    static NSInteger nextId = 100;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        nextId = 100 + arc4random_uniform(500);
-    });
-    return nextId++;
+    static NSInteger counter = 0;
+    counter = counter + 1;
+    if (counter > 900) {
+        counter = 100;
+    }
+    return counter + 100;
 }
 
 + (void)releasePointId:(NSInteger)pointId {
-    // لا حاجة لعمل شيء
+    // لا شيء
 }
 
 + (NSInteger)fakeTouchId:(NSInteger)pointId
                  AtPoint:(CGPoint)point
           withTouchPhase:(UITouchPhase)phase {
-    if (!g_HIDClient || !_createDigitizerEvent || !_dispatchEvent) return -1;
 
-    // تحويل طور UITouch إلى قناع IOHID
-    uint32_t eventMask = 0;
-    BOOL isTouch = YES;
-    BOOL inRange = YES;
-
-    switch (phase) {
-        case UITouchPhaseBegan:
-            eventMask = kIOHIDDigitizerEventRange | kIOHIDDigitizerEventTouch | kIOHIDDigitizerEventPosition;
-            isTouch = YES;
-            inRange = YES;
-            break;
-        case UITouchPhaseMoved:
-            eventMask = kIOHIDDigitizerEventPosition;
-            isTouch = YES;
-            inRange =;
-        case UITouchPhaseEnded:
-        case UITouchPhaseCancelled:
-            eventMask = kIOHIDDigitizerEventRange | kIOHIDDigitizerEventTouch;
-            isTouch = NO;
-            inRange = NO;
-            break;
-        default:
-            return -1;
+    if (g_Client == NULL || fn_createDigitizer == NULL || fn_dispatch == NULL) {
+        return -1;
     }
 
-    // الحدث الأب (اليد)
-    CFTypeRef parentEvent = _createDigitizerEvent(
+    uint32_t mask = 0;
+    BOOL touchFlag = YES;
+    BOOL rangeFlag = YES;
+
+    if (phase == UITouchPhaseBegan) {
+        mask = kEventRange | kEventTouch | kEventPosition;
+        touchFlag = YES;
+        rangeFlag = YES;
+    } else if (phase == UITouchPhaseMoved) {
+        mask = kEventPosition;
+        touchFlag = YES;
+        rangeFlag = YES;
+    } else if (phase == UITouchPhaseEnded || phase == UITouchPhaseCancelled) {
+        mask = kEventRange | kEventTouch;
+        touchFlag = NO;
+        rangeFlag = NO;
+    } else {
+        return -1;
+    }
+
+    CFTypeRef parent = fn_createDigitizer(
         kCFAllocatorDefault,
         mach_absolute_time(),
-        kIOHIDDigitizerTransducerTypeHand,
+        kTransducerHand,
         0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0,
-        true, 0
+        0.0, 0.0, 0.0, 0.0, 0.0,
+        0,
+        true,
+        0
     );
-    if (!parentEvent) return -1;
 
-    // الحدث الفرعي (الإصبع)
-    CFTypeRef fingerEvent = NULL;
-    if (_createFingerEvent) {
-        fingerEvent = _createFingerEvent(
+    if (parent == NULL) {
+        return -1;
+    }
+
+    if (fn_createFinger != NULL) {
+        CFTypeRef finger = fn_createFinger(
             kCFAllocatorDefault,
             mach_absolute_time(),
-            1,                                  // index
-            (uint32_t)pointId,                  // identity
-            eventMask,
-            point.x, point.y, 0.0,
-            0.0, 0.0,
-            isTouch,
-            inRange,
+            1,
+            (uint32_t)pointId,
+            mask,
+            (double)point.x,
+            (double)point.y,
+            0.0,
+            0.0,
+            0.0,
+            rangeFlag,
+            touchFlag,
             0
         );
+
+        if (finger != NULL) {
+            if (fn_append != NULL) {
+                fn_append(parent, finger);
+            }
+            CFRelease(finger);
+        }
     }
 
-    if (fingerEvent && _appendEvent) {
-        _appendEvent(parentEvent, fingerEvent);
-        CFRelease(fingerEvent);
-    }
-
-    _dispatchEvent(g_HIDClient, parentEvent);
-    CFRelease(parentEvent);
+    fn_dispatch(g_Client, parent);
+    CFRelease(parent);
 
     return pointId;
 }
