@@ -35,7 +35,7 @@
     return self;
 }
 
-#pragma mark - Helper: الحصول على النافذة الرئيسية (بدون keyWindow)
+#pragma mark - Helper
 
 - (UIWindow *)activeWindow {
     UIWindow *found = nil;
@@ -45,10 +45,7 @@
                 [scene isKindOfClass:[UIWindowScene class]]) {
                 UIWindowScene *ws = (UIWindowScene *)scene;
                 for (UIWindow *w in ws.windows) {
-                    if (w.isKeyWindow) {
-                        found = w;
-                        break;
-                    }
+                    if (w.isKeyWindow) { found = w; break; }
                 }
                 if (!found && ws.windows.count > 0) found = ws.windows.firstObject;
             }
@@ -56,7 +53,6 @@
         }
     }
     if (!found) {
-        // fallback للتطبيقات القديمة
         found = [UIApplication sharedApplication].windows.firstObject;
     }
     return found;
@@ -64,10 +60,41 @@
 
 #pragma mark - Public
 
-- (void)show {
+- (void)showInWindowScene:(UIWindowScene *)scene {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!self.overlayWindow) [self setupOverlayWindow];
+        if (self.overlayWindow) {
+            self.overlayWindow.hidden = NO;
+            return;
+        }
+
+        CGRect screenBounds = [UIScreen mainScreen].bounds;
+        CGRect panelFrame = CGRectMake(
+            screenBounds.size.width - PANEL_WIDTH - PANEL_PADDING,
+            100,
+            PANEL_WIDTH,
+            BUTTON_HEIGHT * 4 + PANEL_PADDING * 5
+        );
+
+        // مهم: إنشاء النافذة عبر windowScene للتوافق مع iOS 13+
+        if (@available(iOS 13.0, *)) {
+            if (scene != nil) {
+                self.overlayWindow = [[UIWindow alloc] initWithWindowScene:scene];
+                self.overlayWindow.frame = panelFrame;
+            } else {
+                self.overlayWindow = [[UIWindow alloc] initWithFrame:panelFrame];
+            }
+        } else {
+            self.overlayWindow = [[UIWindow alloc] initWithFrame:panelFrame];
+        }
+
+        self.overlayWindow.windowLevel = UIWindowLevelAlert + 100;
+        self.overlayWindow.backgroundColor = [UIColor clearColor];
+        self.overlayWindow.rootViewController = [UIViewController new];
         self.overlayWindow.hidden = NO;
+
+        NSLog(@"[GestureRecorder] Overlay window created: %@", self.overlayWindow);
+
+        [self buildPanel];
     });
 }
 
@@ -77,43 +104,9 @@
     });
 }
 
-- (void)flashIndicatorAtPoint:(CGPoint)point {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        CGFloat r = 30.0;
-        UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(point.x - r, point.y - r, r * 2, r * 2)];
-        dot.backgroundColor = [[UIColor redColor] colorWithAlphaComponent:0.45];
-        dot.layer.cornerRadius = r;
-        dot.userInteractionEnabled = NO;
+#pragma mark - Build UI
 
-        UIWindow *host = [self activeWindow];
-        if (!host) return;
-        [host addSubview:dot];
-
-        [UIView animateWithDuration:0.35 animations:^{
-            dot.transform = CGAffineTransformMakeScale(1.6, 1.6);
-            dot.alpha = 0;
-        } completion:^(BOOL finished) {
-            [dot removeFromSuperview];
-        }];
-    });
-}
-
-#pragma mark - Setup
-
-- (void)setupOverlayWindow {
-    CGRect panelFrame = CGRectMake(
-        [UIScreen mainScreen].bounds.size.width - PANEL_WIDTH - PANEL_PADDING,
-        100,
-        PANEL_WIDTH,
-        BUTTON_HEIGHT * 4 + PANEL_PADDING * 5
-    );
-
-    self.overlayWindow = [[UIWindow alloc] initWithFrame:panelFrame];
-    self.overlayWindow.windowLevel = UIWindowLevelAlert + 1;
-    self.overlayWindow.backgroundColor = [UIColor clearColor];
-    self.overlayWindow.rootViewController = [UIViewController new];
-    self.overlayWindow.hidden = YES;
-
+- (void)buildPanel {
     self.panelView = [[UIView alloc] initWithFrame:self.overlayWindow.bounds];
     self.panelView.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.85];
     self.panelView.layer.cornerRadius = 12;
@@ -123,7 +116,7 @@
                                                                          action:@selector(handlePan:)];
     [self.panelView addGestureRecognizer:pan];
 
-    NSArray *titles = @[@"⏺ بدء التسجيل", @"⏹ إيقاف وحفظ", @"▶ تشغيل/تكرار", @"⏸ إيقاف"];
+    NSArray *titles = @[@"بدء التسجيل", @"إيقاف وحفظ", @"تشغيل/تكرار", @"إيقاف"];
     SEL actions[4] = {@selector(startRecording),
                       @selector(stopAndSave),
                       @selector(playRecording),
@@ -151,8 +144,8 @@
 
 - (void)handlePan:(UIPanGestureRecognizer *)g {
     CGPoint t = [g translationInView:self.overlayWindow];
-    self.panelView.center = CGPointMake(self.panelView.center.x + t.x,
-                                        self.panelView.center.y + t.y);
+    self.overlayWindow.center = CGPointMake(self.overlayWindow.center.x + t.x,
+                                            self.overlayWindow.center.y + t.y);
     [g setTranslation:CGPointZero inView:self.overlayWindow];
 }
 
@@ -163,12 +156,13 @@
     self.isRecording = YES;
     self.isPlaying = NO;
     [self showToast:@"بدأ التسجيل..."];
+    NSLog(@"[GestureRecorder] Recording started");
 }
 
 - (void)stopAndSave {
     self.isRecording = NO;
-    [self showToast:[NSString stringWithFormat:@"تم الحفظ: %lu لمسة",
-                     (unsigned long)self.recordedTouches.count]];
+    [self showToast:[NSString stringWithFormat:@"تم الحفظ: %lu", (unsigned long)self.recordedTouches.count]];
+    NSLog(@"[GestureRecorder] Saved %lu touches", (unsigned long)self.recordedTouches.count);
 }
 
 - (void)playRecording {
@@ -212,22 +206,45 @@
 
         [PTFakeTouch fakeTouchId:pid AtPoint:point withTouchPhase:UITouchPhaseBegan];
         [NSThread sleepForTimeInterval:0.05];
-
         [PTFakeTouch fakeTouchId:pid
                          AtPoint:CGPointMake(point.x + 0.5, point.y + 0.5)
                   withTouchPhase:UITouchPhaseMoved];
         [NSThread sleepForTimeInterval:0.03];
-
         [PTFakeTouch fakeTouchId:pid AtPoint:point withTouchPhase:UITouchPhaseEnded];
     });
 
     self.playIndex++;
 }
 
-#pragma mark - Toast
+#pragma mark - Visual
+
+- (void)flashIndicatorAtPoint:(CGPoint)point {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *host = [self activeWindow];
+        if (!host) host = self.overlayWindow;
+        if (!host) return;
+
+        CGFloat r = 30.0;
+        UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(point.x - r, point.y - r, r * 2, r * 2)];
+        dot.backgroundColor = [[UIColor redColor] colorWithAlphaComponent:0.45];
+        dot.layer.cornerRadius = r;
+        dot.userInteractionEnabled = NO;
+        [host addSubview:dot];
+
+        [UIView animateWithDuration:0.35 animations:^{
+            dot.transform = CGAffineTransformMakeScale(1.6, 1.6);
+            dot.alpha = 0;
+        } completion:^(BOOL finished) {
+            [dot removeFromSuperview];
+        }];
+    });
+}
 
 - (void)showToast:(NSString *)msg {
     dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *host = [self activeWindow];
+        if (!host) return;
+
         UILabel *toast = [[UILabel alloc] initWithFrame:CGRectMake(20, 80,
                                                                    [UIScreen mainScreen].bounds.size.width - 40,
                                                                    36)];
@@ -239,9 +256,6 @@
         toast.clipsToBounds = YES;
         toast.font = [UIFont systemFontOfSize:13];
         toast.userInteractionEnabled = NO;
-
-        UIWindow *host = [self activeWindow];
-        if (!host) return;
         [host addSubview:toast];
 
         [UIView animateWithDuration:2.0 animations:^{
